@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up · Voice Splitter</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  main { max-width: 780px; margin: 0 auto; padding: 28px 18px 60px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  .lede { color: var(--muted); margin: 0 0 22px; max-width: 62ch; }
+  .step { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px 18px; margin-bottom: 14px; }
+  .step > header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .step h2 { font-size: 17px; margin: 0; }
+  .n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--raise); font-weight: 700; font-size: 14px; flex: none; }
+  .step.good .n { background: var(--ok); color: #13261a; }
+  .step .state { margin-left: auto; }
+  .checks { display: grid; gap: 2px; }
+  .check { display: grid; grid-template-columns: 22px 210px minmax(0, 1fr); gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); align-items: start; }
+  .check:first-child { border-top: 0; }
+  .ico { font-weight: 700; text-align: center; }
+  .ico.ok { color: var(--ok); } .ico.warn { color: var(--warn); } .ico.bad { color: var(--danger); }
+  .check .fix { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  ol.how { margin: 4px 0 12px 20px; padding: 0; } ol.how li { margin: 4px 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .row input { flex: 1; min-width: 220px; }
+  .bar { height: 6px; background: var(--bg); border-radius: 99px; overflow: hidden; margin-top: 10px; }
+  .bar i { display: block; height: 100%; background: var(--action); width: 0; transition: width .4s; }
+  .prog { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .models { display: grid; gap: 8px; }
+  .model { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 12px;
+    border: 1px solid var(--line2); border-radius: var(--r-md); cursor: pointer; background: var(--panel); }
+  .model:has(input:checked) { border-color: var(--action); background: color-mix(in srgb, var(--action) 8%, var(--panel)); }
+  .model b { font-size: 15px; } .model .meta { font-size: 13px; color: var(--muted); }
+  .rec { color: var(--action); font-size: 12px; font-weight: 700; margin-left: 6px; }
+  .finish { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap; }
+  .finish .muted { flex: 1 1 100%; font-size: 14px; text-align: right; }
+  @media (max-width: 640px) { .check { grid-template-columns: 22px minmax(0, 1fr); } .check > div:last-child { grid-column: 2; } }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Voice Splitter</span>
+  <span class="spacer"></span>
+  <a class="btn ghost small hidden" href="/" id="laterTop">← Library</a>
+</div>
+<main>
+  <h1>Let's get Voice Splitter ready</h1>
+  <p class="lede">Three quick steps: check your PC, connect the free speaker model, and pick how accurate the transcript should be.
+    Everything runs on this PC. Models download once and then work offline.</p>
+
+  <section class="step" id="s1" aria-labelledby="s1h">
+    <header><span class="n">1</span><h2 id="s1h">Check your PC</h2><span class="state"><button class="btn small" id="recheck">Check again</button></span></header>
+    <div class="checks" id="checks"><div class="muted">Checking…</div></div>
+  </section>
+
+  <section class="step" id="s2" aria-labelledby="s2h">
+    <header><span class="n">2</span><h2 id="s2h">Speaker model</h2><span class="state" id="s2state"></span></header>
+    <p class="muted" style="margin:0 0 8px">This model works out who's talking when. It's free, but its makers ask you to accept their terms once.</p>
+    <div id="speaker"></div>
+  </section>
+
+  <section class="step" id="s3" aria-labelledby="s3h">
+    <header><span class="n">3</span><h2 id="s3h">Transcription model</h2><span class="state" id="s3state"></span></header>
+    <p class="muted" style="margin:0 0 10px">This writes down what's said. Bigger is more accurate but slower and needs more memory. You can change it later in Settings.</p>
+    <div class="models" id="models" role="radiogroup" aria-label="Transcription model"></div>
+    <div class="row" style="margin-top:12px"><button class="btn primary" id="getModel">Download</button><span class="prog" id="wprog"></span></div>
+    <div class="bar hidden" id="wbar"><i></i></div>
+  </section>
+
+  <div class="finish">
+    <span class="muted" id="finishNote"></span>
+    <a class="btn ghost" href="/?skip">I'll finish later</a>
+    <button class="btn primary" id="done">Open Voice Splitter</button>
+  </div>
+</main>
+<div id="toast" class="toast hidden"></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const json = (method, body) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  if (!r.ok) { const t = await r.text(); throw new Error(t.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300)); }
+  return r.json();
+}
+function toast(msg, err) {
+  const t = $("#toast"); t.textContent = msg; t.className = "toast" + (err ? " err" : "");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), err ? 7000 : 3500);
+}
+const gb = b => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.max(1, Math.round(b / 1e6)) + " MB";
+let S = null, pick = null, polling = {};
+
+function renderChecks() {
+  const icon = ok => ok === true ? ["ok", "✓"] : ok === "warn" ? ["warn", "!"] : ["bad", "✕"];
+  $("#checks").innerHTML = S.checks.map(c => {
+    const [cls, ch] = icon(c.ok);
+    return `<div class="check"><span class="ico ${cls}" aria-label="${cls === "ok" ? "OK" : cls === "warn" ? "Works, could be better" : "Needs fixing"}">${ch}</span>
+      <b>${esc(c.label)}</b><div><div>${esc(c.detail)}</div>${c.fix ? `<div class="fix">${esc(c.fix)}</div>` : ""}</div></div>`;
+  }).join("");
+  const blocking = S.checks.some(c => c.ok === false);
+  $("#s1").classList.toggle("good", !blocking);
+}
+
+function renderSpeaker() {
+  const sp = S.speaker, j = sp.job;
+  const tokenSet = sp.token !== "none";
+  const ready = sp.downloaded || (j && j.state === "done");
+  $("#s2").classList.toggle("good", ready);
+  $("#s2state").innerHTML = ready ? '<span class="badge ok">Ready</span>' : "";
+  if (ready) { $("#speaker").innerHTML = `<div class="muted">Downloaded. You're set.</div>`; return; }
+  $("#speaker").innerHTML = `
+    <ol class="how">
+      <li>Sign in (or make a free account) at Hugging Face, then open <a href="${esc(sp.page)}" target="_blank" rel="noopener">the speaker model's page</a> and accept its conditions.</li>
+      <li>Create a <b>Read</b> token at <a href="${esc(sp.token_page)}" target="_blank" rel="noopener">huggingface.co/settings/tokens</a> and paste it here. It's saved only on this PC.</li>
+    </ol>
+    ${tokenSet ? `<div class="row"><span class="badge ok">Token saved${sp.token === "env" ? " (from HF_TOKEN)" : ""}</span>
+        <button class="btn small ghost" id="changeTok">Change token</button><span class="spacer"></span>
+        <button class="btn primary" id="getSpeaker">Download (about 40 MB)</button></div>`
+      : `<div class="row"><input type="password" id="tok" placeholder="hf_..." aria-label="Hugging Face token" autocomplete="off"><button class="btn primary" id="saveTok">Save and check</button></div>`}
+    <div class="prog" id="sprog">${j && j.state === "error" ? esc(j.error) : ""}</div>
+    <div class="bar ${j && j.state === "running" ? "" : "hidden"}" id="sbar"><i></i></div>`;
+  if ($("#saveTok")) $("#saveTok").onclick = saveToken;
+  if ($("#tok")) $("#tok").onkeydown = e => { if (e.key === "Enter") saveToken(); };
+  if ($("#changeTok")) $("#changeTok").onclick = async () => { await api("/api/token", { method: "DELETE" }); await load(); };
+  if ($("#getSpeaker")) {
+    $("#getSpeaker").disabled = !!(j && j.state === "running");
+    $("#getSpeaker").onclick = () => { $("#getSpeaker").disabled = true; download("speaker", "#sbar", "#sprog"); };
+  }
+  if (j && j.state === "running") watch("speaker", "#sbar", "#sprog");
+}
+
+async function saveToken() {
+  const t = $("#tok").value.trim();
+  if (!t.startsWith("hf_")) { toast("Hugging Face tokens start with hf_", true); return; }
+  try {
+    await api("/api/token", json("POST", { token: t }));
+    $("#sprog").textContent = "Checking the token…";
+    const r = await api("/api/token/test", { method: "POST" });
+    if (!r.ok) {
+      const blocked = (r.results || []).filter(x => !x.ok).map(x => x.repo).join(", ");
+      $("#sprog").textContent = r.error || `Token works, but these need their terms accepted first: ${blocked}`;
+    }
+    await load();
+    if (r.ok) download("speaker", "#sbar", "#sprog");
+  } catch (e) { toast(e.message, true); }
+}
+
+function renderModels() {
+  const w = S.whisper;
+  const have = k => w.models[k] && (w.models[k].downloaded || (w.models[k].job && w.models[k].job.state === "done"));
+  pick = pick || (have(w.chosen) ? w.chosen : w.recommended);  // fresh PC: start on the recommendation
+  const order = ["base", "small", "medium", "turbo", "large-v3"];
+  $("#models").innerHTML = order.map(k => {
+    const m = w.models[k];
+    const have = m.downloaded || (m.job && m.job.state === "done");
+    return `<label class="model"><input type="radio" name="wm" value="${k}" ${k === pick ? "checked" : ""}>
+      <span><b>${esc(m.label)}</b>${k === w.recommended ? '<span class="rec">Recommended for your PC</span>' : ""}
+        <div class="meta">${esc(m.note)}</div></span>
+      <span class="meta num">${have ? '<span class="badge ok">Downloaded</span>' : `${m.gb >= 1 ? m.gb.toFixed(1) + " GB" : Math.round(m.gb * 1000) + " MB"} · ${m.vram} GB+ GPU`}</span></label>`;
+  }).join("");
+  $("#models").onchange = e => { pick = e.target.value; renderModelButton(); };
+  renderModelButton();
+}
+function renderModelButton() {
+  const m = S.whisper.models[pick], have = m.downloaded || (m.job && m.job.state === "done");
+  const ready = Object.values(S.whisper.models).some(x => x.downloaded || (x.job && x.job.state === "done")) && have;
+  $("#s3").classList.toggle("good", ready);
+  $("#s3state").innerHTML = ready ? '<span class="badge ok">Ready</span>' : "";
+  const b = $("#getModel");
+  b.textContent = have ? `Use ${m.label}` : `Download ${m.label}`;
+  b.onclick = async () => {
+    if (have) { await api("/api/setup/download", json("POST", { model: "whisper:" + pick })); toast(`${m.label} will be used.`); return; }
+    b.disabled = true;
+    download("whisper:" + pick, "#wbar", "#wprog");
+  };
+  const j = m.job;
+  b.disabled = !!(j && j.state === "running");
+  if (j && j.state === "running") watch("whisper:" + pick, "#wbar", "#wprog");
+  else { $("#wbar").classList.add("hidden"); $("#wprog").textContent = j && j.state === "error" ? j.error : ""; }
+  renderFinish();
+}
+
+async function download(key, barSel, progSel) {
+  try {
+    await api("/api/setup/download", json("POST", { model: key }));
+    watch(key, barSel, progSel);
+  } catch (e) { toast(e.message, true); }
+}
+function watch(key, barSel, progSel) {
+  if (polling[key]) return;
+  $(barSel).classList.remove("hidden");
+  polling[key] = setInterval(async () => {
+    try {
+      const j = await api(`/api/setup/download/${encodeURIComponent(key)}`);
+      const pct = j.total ? Math.min(100, Math.round(j.done / j.total * 100)) : 0;
+      $(barSel).querySelector("i").style.width = pct + "%";
+      $(progSel).textContent = j.state === "running" ? `Downloading… ${gb(j.done)} of ${gb(j.total)}` : j.state === "error" ? j.error : j.state === "done" ? "Downloaded." : "";
+      if (j.state !== "running") { clearInterval(polling[key]); delete polling[key]; await load(); }
+    } catch (e) { clearInterval(polling[key]); delete polling[key]; }
+  }, 800);
+}
+
+function renderFinish() {
+  const blocking = S.checks.some(c => c.ok === false);
+  const sp = S.speaker.downloaded || (S.speaker.job && S.speaker.job.state === "done");
+  const m = S.whisper.models[pick];
+  const wm = m && (m.downloaded || (m.job && m.job.state === "done"));
+  const missing = [blocking && "fix the red item in step 1", !sp && "download the speaker model", !wm && "download a transcription model"].filter(Boolean);
+  $("#finishNote").textContent = missing.length ? `Still to do: ${missing.join(", ")}.` : "All set.";
+}
+
+async function load() {
+  try { S = await api("/api/setup"); $("#laterTop").classList.toggle("hidden", !S.done); renderChecks(); renderSpeaker(); renderModels(); }
+  catch (e) { toast(e.message, true); }
+}
+$("#recheck").onclick = () => { $("#checks").innerHTML = '<div class="muted">Checking…</div>'; load(); };
+$("#done").onclick = async () => { await api("/api/setup/complete", { method: "POST" }); location.href = "/"; };
+load();
+</script>
+</body>
+</html>

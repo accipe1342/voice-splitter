@@ -1,0 +1,11 @@
+# your data and environment: never committed
+.venv/
+projects/
+inbox/
+secrets/
+settings.json
+export/
+__pycache__/
+*.pyc
+.pytest_cache/
+.pytest_cache/

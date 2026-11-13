@@ -1,0 +1,7 @@
+flask>=3.0
+numpy
+soundfile
+pyannote.audio>=4.0
+faster-whisper>=1.0
+imageio-ffmpeg
+huggingface_hub

@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings · Voice Splitter</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); max-width: 1100px; margin: 0 auto; }
+  nav { position: sticky; top: 0; align-self: start; padding: 18px 0 18px 16px; display: flex; flex-direction: column; gap: 2px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 6px 10px; border-radius: 4px; border-left: 2px solid transparent; }
+  nav a:hover { color: var(--text); background: var(--bg2); }
+  nav a.on { color: var(--text); border-left-color: var(--action); background: var(--bg2); }
+  main { padding: 18px 16px 80px 24px; min-width: 0; }
+  section { background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 16px; scroll-margin-top: 16px; }
+  section h2 { margin: 0; padding: 13px 16px; font-size: 17px; font-weight: 700;
+    border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+  .field { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 300px); gap: 16px; padding: 12px 16px;
+    border-bottom: 1px solid var(--line); align-items: center; }
+  .field:last-child { border-bottom: 0; }
+  .field .lbl b { display: block; font-weight: 500; }
+  .field .lbl span { color: var(--muted); font-size: 12px; }
+  .field .ctl { display: flex; gap: 8px; align-items: center; justify-content: flex-end; min-width: 0; }
+  .ctl select, .ctl input[type=text], .ctl input[type=password], .ctl input[type=number] { width: 100%; }
+  .ctl input[type=number] { max-width: 110px; }
+  input[type=number] { background: var(--bg); border: 1px solid var(--line2); border-radius: 4px; padding: 5px 8px; }
+  .unit { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 4px; overflow: hidden; }
+  .seg button { background: var(--bg); border: 0; padding: 5px 12px; cursor: pointer; color: var(--muted); }
+  .seg button + button { border-left: 1px solid var(--line2); }
+  .seg button.on { background: var(--raise); color: var(--text); box-shadow: inset 0 -2px 0 var(--action); }
+  .badge { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line2); color: var(--muted); }
+  .badge.ok { color: var(--ok); border-color: #3f6b4a; } .badge.bad { color: var(--danger); border-color: #6b3a37; }
+  .rows { padding: 4px 16px 12px; }
+  .r { display: flex; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+  .r:last-child { border-bottom: 0; }
+  .r .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .note { color: var(--muted); font-size: 12px; padding: 0 16px 12px; }
+  .tests { padding: 0 16px 12px; font-size: 13px; }
+  .tests div { padding: 3px 0; }
+  .saved { position: fixed; top: 12px; right: 16px; font-size: 12px; color: var(--muted); }
+  .kv { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 6px 12px; padding: 12px 16px; font-size: 13px; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  .kv div { overflow-wrap: anywhere; }
+  @media (max-width: 760px) {
+    .layout { grid-template-columns: minmax(0, 1fr); } nav { display: none; }
+    main { padding: 14px 16px 60px; }
+    .field { grid-template-columns: minmax(0, 1fr); } .field .ctl { justify-content: flex-start; }
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <a href="/" class="btn ghost small" title="Back to your library">← Library</a>
+  <span class="brand">Settings</span>
+  <span class="spacer"></span>
+  <span class="muted" id="saved" style="font-size:12px"></span>
+</div>
+
+<div class="layout">
+  <nav id="nav">
+    <a href="#access">Model access</a>
+    <a href="#split">Splitting</a>
+    <a href="#export">Export</a>
+    <a href="#voiceprint">Voiceprint check</a>
+    <a href="#library">Library folders</a>
+    <a href="#app">App</a>
+    <a href="#storage">Storage</a>
+    <a href="#system">System</a>
+  </nav>
+
+  <main>
+    <section id="access">
+      <h2>Model access <span class="badge" id="tokPill">…</span></h2>
+      <div class="field">
+        <div class="lbl"><b>Hugging Face token</b><span id="tokNote">Needed for the speaker models. Stored only on this PC.</span></div>
+        <div class="ctl"><input type="password" id="tok" placeholder="hf_..." autocomplete="off"><button class="btn" id="tokSave">Save</button></div>
+      </div>
+      <div class="field">
+        <div class="lbl"><b>Check access</b><span>Confirms the token works and that you've accepted each model's terms.</span></div>
+        <div class="ctl"><button class="btn" id="tokTest">Test token</button><button class="btn" id="tokClear" title="Remove the saved token">Remove</button></div>
+      </div>
+      <div class="tests" id="tokResult"></div>
+    </section>
+
+    <section id="split">
+      <h2>Splitting</h2>
+      <div class="field">
+        <div class="lbl"><b>Default number of speakers</b><span>"Auto" lets the model decide. Knowing the count is more accurate.</span></div>
+        <div class="ctl"><select data-k="speakers"><option value="auto">Auto</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></div>
+      </div>
+      <div class="field">
+        <div class="lbl"><b>Language</b><span>Used for the transcript and the GPT-SoVITS dataset.list.</span></div>
+        <div class="ctl"><select data-k="language" id="langSel"></select></div>
+      </div>
+      <div class="field">
+        <div class="lbl"><b>Transcription model</b><span>Bigger is more accurate but slower. A model you haven't downloaded yet downloads on the next split, or get it now in <a href="/setup">Setup</a>.</span></div>
+        <div class="ctl"><select data-k="whisper_model" id="whisperSel"></select></div>
+      </div>
+      <div class="field">
+        <div class="lbl"><b>Run on</b><span>Auto uses your graphics card when available. CPU works everywhere, but is much slower.</span></div>
+        <div class="ctl"><div class="seg" data-seg="device"><button data-v="auto">Auto</button><button data-v="cuda">GPU</button><button data-v="cpu">CPU</button></div></div>
+      </div>
+      <div class="note">Changes apply to the next split. Files already split keep their results; use Redo on the library page to re-run one.</div>
+    </section>
+
+    <section id="export">
+      <h2>Export</h2>
+      <div class="field">
+        <div class="lbl"><b>Shortest clip</b><span>Anything shorter is dropped.</span></div>
+        <div class="ctl"><input type="number" data-k="min_clip" step="0.5" min="0.5" max="30"><span class="unit">seconds</span></div>
+      </div>
+      <div class="field">
+        <div class="lbl"><b>Longest clip</b><span>Longer lines are split between words.</span></div>
+        <div class="ctl"><input type="number" data-k="max_clip" step="1" min="2" max="60"><span class="unit">seconds</span></div>
+      </div>
+      <div class="field">
+        <div class="lbl"><b>Edge trim</b><span>Shaved off both ends of each line so the other person's voice doesn't leak in.</span></div>
+        <div class="ctl"><input type="number" data-k="edge_pad" step="0.02" min="0" max="0.5"><span class="unit">seconds</span></div>
+      </div>
+      <div class="field">
+        <div class="lbl"><b>Preview length</b><span>How long each speaker's preview file is.</span></div>
+        <div class="ctl"><input type="number" data-k="preview_seconds" step="5" min="5" max="120"><span class="unit">seconds</span></div>
+      </div>
+    </section>
+
+    <section id="voiceprint">
+      <h2>Voiceprint check</h2>
+      <div class="field">
+        <div class="lbl"><b>Sensitivity</b><span>How readily it flags a line as "sounds like someone else". Sensitive catches more, with more false alarms.</span></div>
+        <div class="ctl"><div class="seg" data-seg="vp_margin"><button data-v="0.15">Strict</button><button data-v="0.08">Balanced</button><button data-v="0.04">Sensitive</button></div></div>
+      </div>
+      <div class="field">
+        <div class="lbl"><b>Lines it checks</b><span>Only unconfirmed lines up to this length. Short lines are where mistakes hide.</span></div>
+        <div class="ctl"><input type="number" data-k="vp_max_len" step="1" min="1" max="30"><span class="unit">seconds or shorter</span></div>
+      </div>
+    </section>
+
+    <section id="library">
+      <h2>Library folders</h2>
+      <div class="rows" id="folders"></div>
+      <div class="field">
+        <div class="lbl"><b>Add a folder</b><span>Paste its path, e.g. C:\Users\you\Music\Recordings</span></div>
+        <div class="ctl"><input type="text" id="folderIn" placeholder="C:\..."><button class="btn" id="folderAdd">Add</button></div>
+      </div>
+    </section>
+
+    <section id="app">
+      <h2>App</h2>
+      <div class="field">
+        <div class="lbl"><b>Open as</b><span>Its own window (no tabs or address bar), or a normal browser tab. Takes effect next launch.</span></div>
+        <div class="ctl"><div class="seg" data-seg="window"><button data-v="app">App window</button><button data-v="browser">Browser tab</button></div></div>
+      </div>
+    </section>
+
+    <section id="storage">
+      <h2>Storage <span class="badge" id="storeTotal"></span></h2>
+      <div class="rows" id="projects"></div>
+      <div class="field">
+        <div class="lbl"><b>Folders</b><span>Each split keeps a working copy of the audio plus your edits and exports.</span></div>
+        <div class="ctl"><button class="btn" data-open="projects">Open projects</button><button class="btn" data-open="inbox">Open inbox</button></div>
+      </div>
+    </section>
+
+    <section id="system">
+      <h2>System</h2>
+      <div class="kv" id="sys"></div>
+      <div class="note" id="sysNote"></div>
+    </section>
+  </main>
+</div>
+<div id="toast" class="toast hidden"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const json = (method, body) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+let S = null;
+
+function toast(msg, err) {
+  const t = $("#toast"); t.textContent = msg; t.className = "toast" + (err ? " err" : "");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), 4500);
+}
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  if (!r.ok) { const txt = await r.text(); throw new Error(txt.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 240)); }
+  return r.json();
+}
+const size = n => n > 1e9 ? (n / 1e9).toFixed(1) + " GB" : n > 1e6 ? (n / 1e6).toFixed(0) + " MB" : Math.max(1, Math.round(n / 1e3)) + " KB";
+
+/* ---------- settings fields ---------- */
+let saveTimer;
+async function save(patch) {
+  $("#saved").textContent = "Saving…";
+  try { const r = await api("/api/settings", json("PUT", patch)); S.settings = r.settings; fill(); $("#saved").textContent = "Saved"; }
+  catch (e) { $("#saved").textContent = "Not saved"; toast(e.message, true); }
+}
+function fill() {
+  const s = S.settings;
+  document.querySelectorAll("[data-k]").forEach(el => { if (document.activeElement !== el) el.value = String(s[el.dataset.k]); });
+  document.querySelectorAll("[data-seg]").forEach(seg => {
+    const v = String(s[seg.dataset.seg]);
+    let hit = false;
+    seg.querySelectorAll("button").forEach(b => { const on = Math.abs(+b.dataset.v - +v) < 1e-9 || b.dataset.v === v; b.classList.toggle("on", on); hit ||= on; });
+  });
+}
+document.addEventListener("change", e => {
+  const k = e.target.dataset.k; if (!k) return;
+  save({ [k]: e.target.value });
+});
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-seg] button"); if (!b) return;
+  const k = b.closest("[data-seg]").dataset.seg;
+  save({ [k]: b.dataset.v });
+});
+
+/* ---------- token ---------- */
+function renderToken() {
+  const t = S.token, pill = $("#tokPill");
+  const label = { env: "set by Windows (HF_TOKEN)", file: "saved", none: "missing" }[t.source];
+  pill.textContent = label; pill.className = "badge " + (t.source === "none" ? "bad" : "ok");
+  $("#tok").placeholder = t.masked ? `${t.masked}  (paste a new one to replace)` : "hf_...";
+  $("#tokClear").disabled = t.source !== "file";
+  $("#tokNote").innerHTML = t.source === "env"
+    ? `Coming from the Windows setting <span class="mono">HF_TOKEN</span>, which wins over a saved token. To change it, run <span class="mono">setx HF_TOKEN "hf_..."</span> and restart the app.`
+    : `Needed for the speaker models. Stored only on this PC. Get one at <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a> (type: Read).`;
+}
+$("#tokSave").onclick = async () => {
+  const v = $("#tok").value.trim(); if (!v) return;
+  try { await api("/api/token", json("POST", { token: v })); $("#tok").value = ""; toast("Token saved"); await load(); $("#tokTest").click(); }
+  catch (e) { toast(e.message, true); }
+};
+$("#tokClear").onclick = async () => {
+  if (!confirm("Remove the saved token?")) return;
+  await api("/api/token", { method: "DELETE" }); toast("Removed"); load();
+};
+$("#tokTest").onclick = async () => {
+  const out = $("#tokResult"); out.innerHTML = `<div class="muted">Checking…</div>`;
+  try {
+    const r = await api("/api/token/test", { method: "POST" });
+    if (r.error) { out.innerHTML = `<div style="color:var(--danger)">✕ ${esc(r.error)}</div>`; return; }
+    out.innerHTML = `<div class="muted">Signed in as <b style="color:var(--text)">${esc(r.user)}</b></div>` + r.models.map(m => m.ok
+      ? `<div><span style="color:var(--ok)">✓</span> ${esc(m.repo)}</div>`
+      : `<div><span style="color:var(--danger)">✕</span> ${esc(m.repo)}: ${esc(m.error)} <a href="${esc(m.url)}" target="_blank">Open page</a></div>`).join("");
+  } catch (e) { out.innerHTML = `<div style="color:var(--danger)">✕ ${esc(e.message)}</div>`; }
+};
+
+/* ---------- folders ---------- */
+function renderFolders() {
+  $("#folders").innerHTML = S.system.folders.map(f => {
+    const tag = { inbox: "files you drag in", ytdip: "the downloads folder next to this app" }[f.kind];
+    return `<div class="r"><span class="grow mono" title="${esc(f.path)}">${esc(f.path)}</span>
+      ${tag ? `<span class="badge">${tag}</span>` : ""}${f.missing ? `<span class="badge bad">not found</span>` : ""}
+      ${f.remove !== null ? `<button class="btn small" data-rmf="${esc(f.remove)}">Remove</button>` : ""}</div>`;
+  }).join("");
+}
+$("#folders").onclick = async e => {
+  const b = e.target.closest("[data-rmf]"); if (!b) return;
+  await api("/api/folders", json("DELETE", { path: b.dataset.rmf })); load();
+};
+$("#folderAdd").onclick = async () => {
+  const p = $("#folderIn").value.trim().replace(/^"|"$/g, ""); if (!p) return;
+  try { await api("/api/folders", json("POST", { path: p })); $("#folderIn").value = ""; toast("Folder added"); load(); }
+  catch (e) { toast(e.message, true); }
+};
+
+/* ---------- storage ---------- */
+function renderProjects() {
+  const ps = S.projects;
+  $("#storeTotal").textContent = ps.length ? size(ps.reduce((a, p) => a + p.size, 0)) : "empty";
+  $("#projects").innerHTML = ps.length ? ps.map(p => `<div class="r">
+      <span class="grow" title="${esc(p.name)}">${esc(p.name)}${p.created ? ` <span class="muted" style="font-size:12px">split ${esc(p.created)}</span>` : ""}</span>
+      ${p.exported ? `<span class="badge ok">exported</span>` : ""}
+      <span class="muted" style="font-size:12px;min-width:56px;text-align:right">${size(p.size)}</span>
+      <a class="btn small" href="/review/${encodeURIComponent(p.id)}">Review</a>
+      <button class="btn small" data-del="${esc(p.id)}" data-name="${esc(p.name)}">Delete</button></div>`).join("")
+    : `<div class="r muted">No split files yet.</div>`;
+}
+$("#projects").onclick = async e => {
+  const b = e.target.closest("[data-del]"); if (!b) return;
+  if (!confirm(`Delete the split of "${b.dataset.name}"?\n\nYour original file is kept. Its corrections and exported clips are removed.`)) return;
+  await api(`/api/projects/${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" }); toast("Deleted"); load();
+};
+document.querySelectorAll("[data-open]").forEach(b => b.onclick = () => api(`/api/open/${b.dataset.open}`, { method: "POST" }));
+
+/* ---------- system ---------- */
+function renderSystem() {
+  const s = S.system, g = s.gpu;
+  const gpu = !g.checked ? "checking…" : g.available ? `✓ ${esc(g.name)}` : `not available${g.error ? " (" + esc(g.error) + ")" : ""}`;
+  $("#sys").innerHTML = `
+    <div>ffmpeg</div><div>${s.ffmpeg ? esc(s.ffmpeg) : '<span style="color:var(--danger)">not found</span>'}</div>
+    <div>Graphics card</div><div>${gpu}</div>
+    <div>PyTorch</div><div>${esc(g.torch || (g.checked ? "not installed" : "…"))}</div>
+    <div>Python</div><div>${esc(s.python)}</div>
+    <div>App folder</div><div class="mono">${esc(s.root)}</div>`;
+  $("#sysNote").textContent = g.checked && !g.available && S.settings.device !== "cpu"
+    ? "No GPU detected, so splitting runs on the CPU. If you have an NVIDIA card, see README › Troubleshooting." : "";
+  if (!g.checked) setTimeout(async () => { const r = await api("/api/settings"); S.system = r.system; renderSystem(); }, 1500);
+}
+
+/* ---------- boot ---------- */
+async function load() {
+  S = await api("/api/settings");
+  if (!$("#langSel").options.length) {
+    $("#langSel").innerHTML = Object.entries(S.options.languages).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+    $("#whisperSel").innerHTML = S.options.whisper_models.map(m => `<option value="${m.id}">${esc(m.label)}</option>`).join("");
+  }
+  fill(); renderToken(); renderFolders(); renderProjects(); renderSystem();
+}
+const navLinks = [...document.querySelectorAll("#nav a")];
+const io = new IntersectionObserver(es => es.forEach(en => {
+  if (en.isIntersecting) navLinks.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + en.target.id));
+}), { rootMargin: "-10% 0px -80% 0px" });
+document.querySelectorAll("section").forEach(s => io.observe(s));
+load().then(() => {
+  if (location.hash === "#access" && S.token.source !== "none") $("#tokTest").click();
+}).catch(e => toast(e.message, true));
+</script>
+</body>
+</html>

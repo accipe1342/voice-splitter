@@ -1,0 +1,33 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the download
+        run: |
+          name="voice-splitter-${GITHUB_REF_NAME#v}"
+          git archive --format=zip --prefix="$name/" -o "$name.zip" HEAD \
+            ':(exclude).github' ':(exclude)tests' ':(exclude)docs'
+          echo "ZIP=$name.zip" >> "$GITHUB_ENV"
+      - name: Release notes from CHANGELOG.md
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section for $v"; exit 1; }
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # works whether the release was drafted on GitHub first or only the tag was pushed
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$ZIP" --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "Voice Splitter $GITHUB_REF_NAME" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" "$ZIP" --title "Voice Splitter $GITHUB_REF_NAME" --notes-file notes.md
+          fi
