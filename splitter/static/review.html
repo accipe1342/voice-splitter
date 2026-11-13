@@ -761,8 +761,9 @@ async function resplit(opts) {
     for (;;) {
       await new Promise(r => setTimeout(r, 700));
       const st = await api(`/api/jobs/${j.job}`);
-      $("#saved").textContent = st.step ? st.step + "…" : "Re-splitting…";
+      $("#saved").textContent = st.state === "queued" ? "Waiting in the queue…" : st.step ? st.step.replace(/…$/, "") + "…" : "Re-splitting…";
       if (st.state === "error") throw new Error(st.error || "Re-split failed");
+      if (st.state === "cancelled") throw new Error("Re-split cancelled. Nothing changed.");
       if (st.state === "done") break;
     }
     snapshot();

@@ -53,12 +53,40 @@
   .fname { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fmeta { font-size: 13px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 1px; }
   .act { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
-  .stages { display: flex; gap: 4px; align-items: center; }
-  .stages i { width: 34px; height: 6px; border-radius: 3px; background: var(--line2); }
-  .stages i.done { background: var(--action); }
-  .stages i.now { background: linear-gradient(90deg, var(--action) 0 50%, var(--line2) 50%); background-size: 200% 100%; animation: slide 1.2s linear infinite; }
-  @keyframes slide { from { background-position: 100% 0; } to { background-position: 0 0; } }
-  .stagelabel { font-size: 13px; color: var(--action); min-width: 120px; }
+  .act .status { display: inline-flex; align-items: center; gap: 6px; }
+  .act .btns { display: inline-flex; gap: 8px; }
+
+  /* your own labels: small square tags, quieter than the round status pills */
+  .tags { display: inline-flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+  .tag { display: inline-flex; align-items: center; gap: 2px; height: 20px; padding: 0 3px 0 7px; border-radius: var(--r-sm);
+    background: var(--raise); color: var(--text); font-size: 12px; line-height: 20px; }
+  .tag button, .tagadd { background: none; border: 0; color: var(--faint); font: inherit; cursor: pointer; padding: 0 4px; border-radius: var(--r-sm); }
+  .tag button:hover { color: var(--text); }
+  .tagadd { font-size: 12px; height: 20px; opacity: 0; }
+  .file:hover .tagadd, .file:focus-within .tagadd, .tagadd:focus-visible { opacity: 1; }
+  .tagadd:hover { color: var(--text); background: var(--raise); }
+  .taginput { width: 120px; height: 22px; padding: 0 7px; font-size: 12px; border-radius: var(--r-sm); }
+  @media (hover: none) { .tagadd { opacity: 1; } }
+
+  /* the queue: what's splitting now, what's next, and what just finished */
+  .queue { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg2); margin: 22px 0 0; }
+  .qhead { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .qhead h2 { font-size: 16px; margin: 0; }
+  .qsum { color: var(--muted); font-size: 13px; }
+  .qlist { list-style: none; margin: 0; padding: 0; }
+  .qrow { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 14px; }
+  .qrow + .qrow { border-top: 1px solid var(--line); }
+  .qrow .pos { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700;
+    background: var(--raise); color: var(--muted); }
+  .qrow.run .pos { background: color-mix(in srgb, var(--action) 22%, var(--bg)); color: var(--action); }
+  .qrow.done .pos { color: var(--ok); } .qrow.error .pos { color: var(--danger); }
+  .qname { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qinfo { font-size: 13px; color: var(--muted); }
+  .qrow.error .qinfo { color: var(--danger); }
+  .qbtns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .qbar { grid-column: 2 / -1; height: 4px; border-radius: 2px; background: var(--line2); overflow: hidden; }
+  .qbar i { display: block; height: 100%; width: var(--p, 0%); background: var(--action); transition: width .6s ease; }
+  .qrow.recent .qname { font-weight: 400; }
   .empty { padding: 34px 18px; text-align: center; color: var(--muted); }
   .folders { margin-top: 12px; font-size: 13px; color: var(--muted); }
   .folders a { color: var(--muted); }
@@ -67,6 +95,7 @@
     .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .steps li:nth-child(3) { border-left: 0; } .steps li:nth-child(n+3) { border-top: 1px solid var(--line); }
     .file { grid-template-columns: 34px minmax(0, 1fr); } .act { grid-column: 1 / -1; justify-content: flex-start; }
+    .qrow { grid-template-columns: 22px minmax(0, 1fr); } .qbtns { grid-column: 2; }
     #search { width: 100%; } .hide-sm { display: none; }
   }
 </style>
@@ -100,6 +129,12 @@
     <small>Files in your library folders show up below on their own.</small>
   </div>
 
+  <section class="queue hidden" id="queue" aria-label="Queue">
+    <div class="qhead"><h2>Queue</h2><span class="qsum num" id="qsum"></span><span class="spacer"></span>
+      <button class="btn small ghost hidden" id="qclear">Clear finished</button></div>
+    <ol class="qlist" id="qlist"></ol>
+  </section>
+
   <div class="bar">
     <h2>Your files</h2><span class="count num" id="count"></span>
     <span class="spacer"></span>
@@ -108,6 +143,8 @@
       <select id="spk"><option value="auto">Not sure</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
   </div>
   <div class="stagefilter" id="stages" role="toolbar" aria-label="Show files"></div>
+  <div class="stagefilter" id="labelfilter" role="toolbar" aria-label="Show files with a label"></div>
+  <datalist id="labelList"></datalist>
   <div class="files" id="files"><div class="empty">Loading…</div></div>
   <div class="folders" id="folders"></div>
 </main>
@@ -120,12 +157,13 @@ const ICON = {
   audio: '<svg viewBox="0 0 16 16"><path d="M2 6h2v4H2zM5 3h2v10H5zM8 5h2v6H8zM11 2h2v12h-2z"/></svg>',
   video: '<svg viewBox="0 0 16 16"><path d="M1 3h10v10H1zM12 6l3-2v8l-3-2z"/></svg>',
 };
-const STAGES = [["Extracting", "Getting the audio"], ["Finding", "Finding who speaks when"], ["Transcribing", "Writing the transcript"]];
-let lib = null, watching = {}, openWhenDone = new Set();
+let lib = null, Q = { running: null, queued: [], recent: [] };
 
-function toast(msg, err) {
-  const t = $("#toast"); t.innerHTML = `<span>${esc(msg)}</span>`; t.className = "toast" + (err ? " err" : "");
-  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), err ? 7000 : 4000);
+function toast(msg, err, action) {
+  const t = $("#toast");
+  t.innerHTML = `<span>${esc(msg)}</span>` + (action ? ` <a href="${esc(action.href)}">${esc(action.label)}</a>` : "");
+  t.className = "toast" + (err ? " err" : "");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), err || action ? 8000 : 4000);
 }
 async function api(path, opts = {}) {
   const r = await fetch(path, opts);
@@ -148,102 +186,222 @@ function renderSetup() {
   s.classList.toggle("hidden", !missing.length);
 }
 
-function stageIndex(step) {
-  const i = STAGES.findIndex(([k]) => (step || "").startsWith(k));
-  return i < 0 ? 0 : i;
+/* ---- status: one pill per file, in the same style everywhere ------------- */
+const ord = n => n + ((n % 100 >= 11 && n % 100 <= 13) ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th"));
+const left = s => s == null ? "" : s < 50 ? "less than a minute" : s < 5400 ? `about ${Math.max(1, Math.round(s / 60))} min` : `about ${(s / 3600).toFixed(1)} h`;
+const SHORT = { "Extracting audio": "Getting audio", "Finding who speaks when": "Finding speakers", "Transcribing": "Transcribing",
+  "Cutting the part to re-split": "Preparing", "Saving": "Saving", "Starting": "Starting", "Stopping…": "Stopping" };
+const shortStep = s => SHORT[s] || (s || "Working").replace(/\s*\(.*\)$/, "");
+
+function live(pid) {
+  if (Q.running && Q.running.project === pid) return { ...Q.running, pos: 0 };
+  const i = Q.queued.findIndex(j => j.project === pid);
+  return i < 0 ? null : { ...Q.queued[i], pos: i + 1 };
 }
-function row(f) {
-  const run = lib.running[f.pid] || Object.values(watching).find(w => w.path === f.path);
-  let act, state = "";
-  if (run) {
-    const i = stageIndex(run.step);
-    const bars = STAGES.map((_, j) => `<i class="${j < i ? "done" : j === i ? "now" : ""}"></i>`).join("");
-    act = `<span class="stagelabel">${run.step === "Waiting" ? "Waiting its turn" : STAGES[i][1]}…</span><span class="stages" aria-hidden="true">${bars}</span>`;
-  } else if (f.project) {
-    state = "ready";
-    const r = f.review || { stage: f.exported ? "exported" : "to_review", kept: 0, checked: 0 };
-    const badge = { exported: '<span class="badge ok">Exported</span>', to_review: '<span class="badge busy">Ready to review</span>',
-      reviewing: `<span class="badge busy">In review</span><span class="progress-n num">${r.checked}/${r.kept} checked</span>`,
-      reviewed: '<span class="badge ok">Ready to export</span>' }[r.stage];
-    act = `${badge}
-      <a class="btn small primary" href="/review/${encodeURIComponent(f.project)}">Review</a>
-      <button class="btn small ghost" data-redo="${esc(f.path)}" title="Run the split again from scratch">Redo</button>`;
-  } else {
-    act = `<button class="btn small primary" data-split="${esc(f.path)}">Split speakers</button>`;
+const failedFor = f => !f.project && Q.recent.find(j => j.project === f.pid && j.kind === "split" && j.state === "error");
+
+function statusOf(f) {
+  const j = live(f.pid);
+  if (j && j.state === "running") {
+    const pct = Math.round((j.pct || 0) * 100);
+    return { pill: `<span class="pill run" style="--p:${pct}%"><span>${esc(shortStep(j.step))}${pct ? ` · ${pct}%` : ""}</span></span>`,
+      btns: `<button class="btn small ghost" data-cancel="${j.id}">Cancel</button>`, key: "run" };
   }
-  return `<div class="file ${state}">
+  if (j) return { pill: `<span class="pill wait">Queued · ${ord(j.pos)}</span>`,
+    btns: `<button class="btn small ghost" data-cancel="${j.id}">Remove</button>`, key: "wait" + j.pos };
+  const bad = failedFor(f);
+  if (bad) return { pill: `<span class="pill bad" title="${esc(bad.error)}">Failed</span>`,
+    btns: `<button class="btn small" data-retry="${bad.id}">Try again</button>`, key: "bad" };
+  if (!f.project) return { pill: "", btns: `<button class="btn small primary" data-split="${esc(f.path)}">Split speakers</button>`, key: "new" };
+  const r = f.review || { stage: f.exported ? "exported" : "to_review", kept: 0, checked: 0 };
+  const pill = {
+    to_review: '<span class="pill todo">Ready to review</span>',
+    reviewing: `<span class="pill todo">In review · <span class="num">${r.checked}/${r.kept}</span></span>`,
+    reviewed: '<span class="pill ok">Ready to export</span>',
+    exported: '<span class="pill ok">Exported</span>' }[r.stage];
+  return { pill, key: "proj" + r.stage,
+    btns: `<a class="btn small primary" href="/review/${encodeURIComponent(f.project)}">Review</a>
+      <button class="btn small ghost" data-redo="${esc(f.path)}" title="Run the split again from scratch">Redo</button>` };
+}
+
+function tagsHtml(f) {
+  return (f.labels || []).map(t => `<span class="tag">${esc(t)}<button data-untag="${esc(t)}" aria-label="Remove label ${esc(t)}" title="Remove">×</button></span>`).join("")
+    + `<button class="tagadd" data-tagadd title="Add a label to this file">+ Label</button>`;
+}
+
+function row(f) {
+  const st = statusOf(f);
+  return `<div class="file ${f.project ? "ready" : ""}" data-pid="${esc(f.pid)}" data-path="${esc(f.path)}">
     <span class="ico" aria-hidden="true">${f.video ? ICON.video : ICON.audio}</span>
     <div style="min-width:0"><div class="fname" title="${esc(f.name)}">${esc(f.name)}</div>
-      <div class="fmeta num"><span>${esc(folderName(f.folder))}</span><span>${size(f.size)}</span><span>${when(f.mtime)}</span></div></div>
-    <div class="act">${act}</div></div>`;
+      <div class="fmeta num"><span>${esc(folderName(f.folder))}</span><span>${size(f.size)}</span><span>${when(f.mtime)}</span>
+        <span class="tags">${tagsHtml(f)}</span></div></div>
+    <div class="act"><span class="status">${st.pill}</span><span class="btns" data-key="${st.key}">${st.btns}</span></div></div>`;
 }
-/* Where each file is: not split yet, splitting, ready to review, in review,
-   ready to export (every kept line checked), or exported since the last edit. */
-const STAGE_LABEL = [["all", "All"], ["new", "Not split"], ["running", "Splitting"], ["to_review", "Ready to review"],
+
+/* Update each row's status where it stands. Buttons are only rebuilt when the
+   state changes, so a click never lands on a button that was just replaced. */
+function patchRows() {
+  if (!lib) return;
+  const byPid = Object.fromEntries(lib.files.map(f => [f.pid, f]));
+  document.querySelectorAll("#files .file").forEach(el => {
+    const f = byPid[el.dataset.pid]; if (!f) return;
+    const st = statusOf(f);
+    const pill = el.querySelector(".status");
+    if (pill.innerHTML !== st.pill) pill.innerHTML = st.pill;
+    const b = el.querySelector(".btns");
+    if (b.dataset.key !== st.key) { b.dataset.key = st.key; b.innerHTML = st.btns; }
+  });
+  renderStages();
+}
+
+/* ---- filters: by stage and by your labels -------------------------------- */
+const STAGE_LABEL = [["all", "All"], ["new", "Not split"], ["running", "In the queue"], ["to_review", "Ready to review"],
   ["reviewing", "In review"], ["reviewed", "Ready to export"], ["exported", "Exported"]];
-let STAGE = localStorage.getItem("vs-lib-stage") || "all";
+let STAGE = "all", LABEL = "";
+try { STAGE = localStorage.getItem("vs-lib-stage") || "all"; LABEL = localStorage.getItem("vs-lib-label") || ""; } catch (_) {}
 function stageOf(f) {
-  if (lib.running[f.pid] || Object.values(watching).find(w => w.path === f.path)) return "running";
+  if (live(f.pid)) return "running";
   if (!f.project) return "new";
   return (f.review && f.review.stage) || (f.exported ? "exported" : "to_review");
 }
 function renderStages() {
   const counts = {};
   for (const f of lib.files) { const st = stageOf(f); counts[st] = (counts[st] || 0) + 1; }
-  if (STAGE !== "all" && !counts[STAGE]) STAGE = "all";
-  $("#stages").innerHTML = lib.files.length ? STAGE_LABEL.filter(([v]) => v === "all" || counts[v]).map(([v, label]) =>
+  const html = lib.files.length ? STAGE_LABEL.filter(([v]) => v === "all" || counts[v]).map(([v, label]) =>
     `<button class="chip" data-stage="${v}" aria-pressed="${STAGE === v}">${label}<span class="n num">${v === "all" ? lib.files.length : counts[v]}</span></button>`).join("") : "";
+  if ($("#stages").innerHTML !== html) $("#stages").innerHTML = html;
+}
+function allLabels() {
+  const n = {};
+  for (const f of lib.files) for (const t of f.labels || []) n[t] = (n[t] || 0) + 1;
+  return Object.entries(n).sort((a, b) => a[0].localeCompare(b[0]));
+}
+function renderLabels() {
+  const labels = allLabels();
+  if (LABEL && !labels.some(([t]) => t === LABEL)) LABEL = "";
+  $("#labelfilter").innerHTML = labels.length ? `<span class="qsum" style="align-self:center">Labels</span>` + labels.map(([t, n]) =>
+    `<button class="chip" data-label="${esc(t)}" aria-pressed="${LABEL === t}">${esc(t)}<span class="n num">${n}</span></button>`).join("") : "";
+  $("#labelList").innerHTML = labels.map(([t]) => `<option value="${esc(t)}">`).join("");
 }
 $("#stages").addEventListener("click", e => {
   const b = e.target.closest("[data-stage]"); if (!b) return;
   STAGE = b.dataset.stage; try { localStorage.setItem("vs-lib-stage", STAGE); } catch (_) {}
   render();
 });
+$("#labelfilter").addEventListener("click", e => {
+  const b = e.target.closest("[data-label]"); if (!b) return;
+  LABEL = LABEL === b.dataset.label ? "" : b.dataset.label;
+  try { localStorage.setItem("vs-lib-label", LABEL); } catch (_) {}
+  render();
+});
+
 function render() {
   renderSetup();
+  if (STAGE !== "all" && !lib.files.some(f => stageOf(f) === STAGE)) STAGE = "all";
   renderStages();
+  renderLabels();
   const q = $("#search").value.trim().toLowerCase();
-  const files = lib.files.filter(f => (!q || f.name.toLowerCase().includes(q)) && (STAGE === "all" || stageOf(f) === STAGE));
+  const files = lib.files.filter(f => (!q || f.name.toLowerCase().includes(q) || (f.labels || []).some(t => t.toLowerCase().includes(q)))
+    && (STAGE === "all" || stageOf(f) === STAGE) && (!LABEL || (f.labels || []).includes(LABEL)));
   $("#count").textContent = lib.files.length ? `${lib.files.length}` : "";
   $("#files").innerHTML = files.length ? files.map(row).join("")
-    : lib.files.length ? `<div class="empty">${q ? `No files match “${esc(q)}”.` : "No files at this stage."}</div>`
+    : lib.files.length ? `<div class="empty">${q ? `No files match “${esc(q)}”.` : "No files here. Try another filter."}</div>`
     : `<div class="empty">No files yet. Drop one above, or add a folder in Settings and its files will appear here.</div>`;
   $("#folders").innerHTML = `Looking in: ${lib.folders.map(f => `<span title="${esc(f)}">${esc(folderName(f))}</span>`).join(", ")}. <a href="/settings#library">Add or remove folders</a>`;
 }
 
-async function load() {
+/* ---- the queue panel -------------------------------------------------------- */
+function qRow(j, kind, pos) {
+  const name = `<div class="qname" title="${esc(j.name)}">${esc(j.name)}</div>`;
+  if (kind === "run") {
+    const pct = Math.round((j.pct || 0) * 100);
+    return `<li class="qrow run" data-id="${j.id}"><span class="pos" aria-hidden="true">▸</span>
+      <div style="min-width:0">${name}<div class="qinfo" data-info>${qRunInfo(j)}</div></div>
+      <div class="qbtns"><button class="btn small ghost" data-cancel="${j.id}">Cancel</button></div>
+      <div class="qbar" aria-hidden="true"><i data-bar style="--p:${pct}%"></i></div></li>`;
+  }
+  if (kind === "wait") {
+    return `<li class="qrow" data-id="${j.id}"><span class="pos num">${pos}</span>
+      <div style="min-width:0">${name}<div class="qinfo" data-info>${qWaitInfo(j, pos)}</div></div>
+      <div class="qbtns">
+        ${pos > 1 ? `<button class="btn small ghost" data-move="top" data-id="${j.id}" title="Move to the front of the queue">Split next</button>
+        <button class="btn small ghost" data-move="up" data-id="${j.id}" title="Move up" aria-label="Move up">↑</button>` : ""}
+        ${pos < Q.queued.length ? `<button class="btn small ghost" data-move="down" data-id="${j.id}" title="Move down" aria-label="Move down">↓</button>` : ""}
+        <button class="btn small ghost" data-cancel="${j.id}" title="Take it out of the queue">Remove</button></div></li>`;
+  }
+  const icon = { done: "✓", error: "!", cancelled: "–" }[j.state];
+  const info = j.state === "done" ? (j.kind === "resplit" ? "Re-split done" : "Ready to review")
+    : j.state === "error" ? esc(j.error) : "Cancelled";
+  const open = j.state === "done" && j.project ? `<a class="btn small" href="/review/${encodeURIComponent(j.project)}">Review</a>` : "";
+  const retry = j.state !== "done" ? `<button class="btn small" data-retry="${j.id}">Try again</button>` : "";
+  return `<li class="qrow recent ${j.state}" data-id="${j.id}"><span class="pos" aria-hidden="true">${icon}</span>
+    <div style="min-width:0">${name}<div class="qinfo">${info}</div></div>
+    <div class="qbtns">${open}${retry}<button class="btn small ghost" data-dismiss="${j.id}" title="Clear from this list" aria-label="Clear">×</button></div></li>`;
+}
+const qRunInfo = j => `${esc(shortStep(j.step))}${j.pct ? ` · ${Math.round(j.pct * 100)}%` : ""}${j.eta != null ? ` · ${left(j.eta)} left` : ""}`;
+const qWaitInfo = (j, pos) => pos === 1 ? "Next" + (j.eta != null && Q.running ? ` · done in ${left(j.eta)}` : "")
+  : `Waiting${j.eta != null ? ` · done in ${left(j.eta)}` : ""}`;
+
+function renderQueue() {
+  const items = [...(Q.running ? [[Q.running, "run"]] : []), ...Q.queued.map((j, i) => [j, "wait", i + 1]), ...Q.recent.map(j => [j, "recent"])];
+  $("#queue").classList.toggle("hidden", !items.length);
+  const waiting = Q.queued.length, busy = !!Q.running;
+  $("#qsum").textContent = !busy && !waiting ? "Nothing waiting"
+    : [busy ? "1 splitting" : "", waiting ? `${waiting} waiting` : "", Q.eta ? `${left(Q.eta)} in all` : ""].filter(Boolean).join(" · ");
+  $("#qclear").classList.toggle("hidden", !Q.recent.length);
+  // rebuild only when the list itself changes; otherwise just move the numbers
+  const sig = items.map(([j, k]) => j.id + k + j.state).join("|");
+  const list = $("#qlist");
+  if (list.dataset.sig !== sig) { list.dataset.sig = sig; list.innerHTML = items.map(([j, k, p]) => qRow(j, k, p)).join(""); return; }
+  if (Q.running) {
+    const li = list.querySelector(`[data-id="${Q.running.id}"]`);
+    if (li) { li.querySelector("[data-info]").innerHTML = qRunInfo(Q.running);
+      li.querySelector("[data-bar]").style.setProperty("--p", Math.round((Q.running.pct || 0) * 100) + "%"); }
+  }
+  Q.queued.forEach((j, i) => { const el = list.querySelector(`[data-id="${j.id}"] [data-info]`); if (el) el.innerHTML = qWaitInfo(j, i + 1); });
+}
+
+let pollTimer = null, seen = {};
+async function pollQueue() {
+  clearTimeout(pollTimer); pollTimer = null;
+  try {
+    Q = await api("/api/queue");
+    let changed = false;
+    for (const j of Q.recent) {
+      if (seen[j.id] === j.state) continue;
+      if (seen[j.id] !== undefined || Date.now() / 1000 - j.finished < 5) {
+        if (j.state === "done" && j.kind === "split") toast(`${j.name} is ready to review.`, false, { label: "Review", href: `/review/${encodeURIComponent(j.project)}` });
+        if (j.state === "error") toast(`Couldn't split ${j.name}: ${j.error}`, true);
+      }
+      seen[j.id] = j.state; changed = true;
+    }
+    for (const j of [Q.running, ...Q.queued].filter(Boolean)) seen[j.id] = j.state;
+    renderQueue();
+    if (changed && lib) { await load(true); } else patchRows();
+  } catch (_) {}
+  if (Q.running || Q.queued.length) pollTimer = setTimeout(pollQueue, 1500);
+}
+
+async function load(quiet) {
   try {
     lib = await api("/api/library");
     if (!load._spk) { $("#spk").value = String(lib.defaults.speakers || "auto"); load._spk = true; }
     render();
-    for (const r of Object.values(lib.running)) if (!watching[r.job]) watchJob(r.job, null);
-  } catch (e) { toast(e.message, true); }
+  } catch (e) { if (!quiet) toast(e.message, true); }
 }
 async function split(path, redo) {
-  if (!lib.has_token) { toast("Add your Hugging Face token first, in the box at the top.", true); return; }
+  if (!lib.has_token) { toast("Finish setup first: the speaker model isn't connected.", true, { label: "Open setup", href: "/setup" }); return; }
   try {
     const r = await api("/api/split", json("POST", { path, speakers: $("#spk").value, redo }));
     if (r.existing) { location.href = `/review/${encodeURIComponent(r.project)}`; return; }
-    openWhenDone.add(r.job); watchJob(r.job, path);
+    seen[r.job] = "queued";
+    await pollQueue();
   } catch (e) { toast(e.message, true); }
 }
-function watchJob(jid, path) {
-  watching[jid] = { path, step: "Waiting" };
-  const tick = async () => {
-    try {
-      const j = await api(`/api/jobs/${jid}`);
-      watching[jid].step = j.step;
-      if (j.state === "done") {
-        delete watching[jid];
-        if (openWhenDone.has(jid)) { location.href = `/review/${encodeURIComponent(j.project)}`; return; }
-        load(); return;
-      }
-      if (j.state === "error") { delete watching[jid]; toast("Couldn't split that file: " + j.error, true); load(); return; }
-      if (lib) render();
-    } catch (_) {}
-    setTimeout(tick, 1000);
-  };
-  tick(); if (lib) render();
+async function queueAct(url, method = "POST", body) {
+  try { await api(url, body ? json(method, body) : { method }); } catch (e) { toast(e.message, true); }
+  await pollQueue();
 }
 async function upload(files) {
   const fd = new FormData(); [...files].forEach(f => fd.append("files", f));
@@ -253,11 +411,55 @@ async function upload(files) {
   catch (e) { toast(e.message, true); }
 }
 
+/* ---- labels ----------------------------------------------------------------- */
+async function saveLabels(f, labels) {
+  try {
+    const r = await api("/api/labels", json("PUT", { path: f.path, labels }));
+    f.labels = r.labels;
+  } catch (e) { toast(e.message, true); }
+  const el = document.querySelector(`#files .file[data-path="${CSS.escape(f.path)}"] .tags`);
+  if (el) el.innerHTML = tagsHtml(f);
+  renderLabels();
+}
+function editLabel(btn, f) {
+  const input = document.createElement("input");
+  input.className = "taginput"; input.setAttribute("list", "labelList"); input.placeholder = "Label";
+  input.setAttribute("aria-label", "New label"); input.maxLength = 32;
+  btn.replaceWith(input); input.focus();
+  let done = false;
+  const finish = save => {
+    if (done) return; done = true;
+    const v = input.value.trim();
+    if (save && v) saveLabels(f, [...(f.labels || []), v]);
+    else input.replaceWith(btn);
+  };
+  input.onkeydown = e => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); };
+  input.onblur = () => finish(true);
+}
+
 $("#files").onclick = e => {
   const b = e.target.closest("button"); if (!b) return;
+  const fileEl = b.closest(".file");
+  const f = fileEl && lib.files.find(x => x.path === fileEl.dataset.path);
   if (b.dataset.split) split(b.dataset.split, false);
   if (b.dataset.redo && confirm("Split this file again from scratch?\n\nYour corrections for it will be replaced.")) split(b.dataset.redo, true);
+  if (b.dataset.cancel) queueAct(`/api/jobs/${b.dataset.cancel}/cancel`);
+  if (b.dataset.retry) queueAct(`/api/jobs/${b.dataset.retry}/retry`);
+  if (b.hasAttribute("data-tagadd") && f) editLabel(b, f);
+  if (b.dataset.untag && f) saveLabels(f, f.labels.filter(t => t !== b.dataset.untag));
 };
+$("#qlist").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.cancel) {
+    const running = Q.running && Q.running.id === b.dataset.cancel;
+    if (running && !confirm(`Stop splitting ${Q.running.name}?`)) return;
+    queueAct(`/api/jobs/${b.dataset.cancel}/cancel`);
+  }
+  if (b.dataset.move) queueAct(`/api/jobs/${b.dataset.id}/move`, "POST", { to: b.dataset.move });
+  if (b.dataset.retry) queueAct(`/api/jobs/${b.dataset.retry}/retry`);
+  if (b.dataset.dismiss) queueAct(`/api/jobs/${b.dataset.dismiss}`, "DELETE");
+};
+$("#qclear").onclick = () => queueAct("/api/queue/recent", "DELETE");
 $("#search").oninput = () => lib && render();
 $("#pick").onclick = () => $("#fileInput").click();
 $("#fileInput").onchange = e => { upload(e.target.files); e.target.value = ""; };
@@ -266,8 +468,12 @@ const drop = $("#drop");
 ["dragleave", "drop"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); if (ev === "drop" || e.target === document.documentElement) drop.classList.remove("over"); }));
 document.addEventListener("drop", e => { drop.classList.remove("over"); if (e.dataTransfer.files.length) upload(e.dataTransfer.files); });
 
-load();
-setInterval(() => { if (!Object.keys(watching).length && document.activeElement !== $("#search")) load(); }, 10000);
+load().then(pollQueue);
+// new files in your folders show up on their own (not while you're typing in the list)
+setInterval(() => {
+  const a = document.activeElement;
+  if (!pollTimer && !(a && (a.id === "search" || a.closest && a.closest("#files")))) load(true);
+}, 10000);
 </script>
 </body>
 </html>

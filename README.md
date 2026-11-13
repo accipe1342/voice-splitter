@@ -72,7 +72,10 @@ library.
    folder in **Settings → Library folders**. Files in those folders show up on
    their own.
 2. **Split speakers.** Pick how many people are talking (or *auto*) and click
-   **Split speakers**. The review screen opens when it's done.
+   **Split speakers**. Click it on as many files as you like: they wait in the
+   **Queue** and split one at a time, so your PC stays usable. The queue shows
+   progress and time left; you can cancel, remove, reorder (**Split next**,
+   ↑ ↓) and retry from there. A note pops up when each one is ready.
 3. **Review.** Skim the lines or the transcript and fix what's wrong.
 4. **Export.** The full transcript (`transcript.txt` and `transcript.srt`),
    plus one folder per speaker with 2–12 second clips, a
@@ -95,6 +98,9 @@ library.
   like a screenplay with the speaker beside each paragraph, and Transcript is
   one block of text. **Edit text** lets you correct the words like a document.
 - **Filters:** show only lines to check, lines left out, or flagged lines.
+- **Labels:** hover a file in the library and click **+ Label** to tag it
+  (*podcast*, *season 2*…). Click a label above the list to show only those
+  files; the search box finds labels too.
 - **Find mislabeled lines:** mark a few lines per voice as checked (select,
   press C), then run it. Lines that sound like someone else get a ⚠.
 - Press **?** for keyboard shortcuts. Everything saves automatically, and

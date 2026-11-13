@@ -29,6 +29,7 @@ import soundfile as sf
 SR = 44100
 MEDIA_EXT = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma",
              ".mp4", ".mkv", ".webm", ".mov", ".avi"}
+VIDEO_EXT = {".mp4", ".mkv", ".webm", ".mov", ".avi"}
 COLORS = ["#e8b04f", "#6cb4e4", "#b89be8", "#84cf8f", "#e5776d", "#d9d36f", "#e08fbf", "#8f9be0"]
 
 
@@ -107,6 +108,60 @@ def _device():
 
 _pipelines = {}
 
+# Long steps report how far along they are (0..1 within the step) through this,
+# so the queue can show a percentage and stop a job that was cancelled.
+_tls = threading.local()
+
+
+class Cancelled(Exception):
+    """Raised inside a job when someone cancels it."""
+
+
+def _tick(frac: float) -> None:
+    f = getattr(_tls, "tick", None)
+    if f:
+        f(max(0.0, min(1.0, float(frac))))
+
+
+def _phase(progress, msg: str, lo: float, hi: float) -> None:
+    """Start a step that covers lo..hi of the whole job."""
+    progress(msg, lo)
+    _tls.tick = lambda f: progress(None, lo + (hi - lo) * f)
+
+
+def _end_phases() -> None:
+    _tls.tick = None
+
+
+# pyannote's steps and how much of the speaker search each one takes
+_DIAR_STEPS = {"segmentation": (0.0, 0.3), "speaker_counting": (0.3, 0.32),
+               "embeddings": (0.32, 0.97), "discrete_diarization": (0.97, 1.0)}
+
+
+def _diar_hook(step_name, _artifact, file=None, total=None, completed=None):
+    lo, hi = _DIAR_STEPS.get(step_name, (None, None))
+    if lo is None:
+        return
+    _tick(lo + (hi - lo) * (completed / total if total and completed is not None else 1.0))
+
+
+def be_gentle() -> None:
+    """Keep the PC usable while a split runs: lower this process's priority and leave
+    a couple of processor cores free. Never raises."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)  # below normal
+        else:
+            os.nice(5)
+    except Exception:
+        pass
+    try:
+        import torch
+        torch.set_num_threads(max(1, (os.cpu_count() or 4) - 2))
+    except Exception:
+        pass
+
 
 def diarize(wav: Path, num_speakers: int | None, token: str | None) -> list[tuple[float, float, str]]:
     from pyannote.audio import Pipeline
@@ -122,7 +177,11 @@ def diarize(wav: Path, num_speakers: int | None, token: str | None) -> list[tupl
             pipe.to(dev)
         _pipelines[(model, str(dev))] = pipe
     kwargs = {"num_speakers": num_speakers} if num_speakers else {}
-    out = pipe(load_audio_tensor(wav), **kwargs)
+    audio = load_audio_tensor(wav)
+    try:
+        out = pipe(audio, hook=_diar_hook, **kwargs)
+    except TypeError:  # an older pipeline without progress hooks
+        out = pipe(audio, **kwargs)
     ann = getattr(out, "exclusive_speaker_diarization", None) or getattr(out, "speaker_diarization", out)
     turns = []
     if hasattr(ann, "itertracks"):
@@ -150,8 +209,11 @@ def transcribe_words(wav: Path, language: str | None) -> list[dict]:
     segs, info = _whisper[key].transcribe(str(wav), language=None if language in (None, "", "auto") else language,
                                        word_timestamps=True, vad_filter=True)
     LAST_LANGUAGE["code"] = getattr(info, "language", None)
+    total = float(getattr(info, "duration", 0) or 0)
     words = []
     for s in segs:
+        if total:
+            _tick(s.end / total)
         for w in s.words or []:
             words.append({"w": w.word.strip(), "s": round(float(w.start), 3), "e": round(float(w.end), 3)})
     return words
@@ -203,23 +265,28 @@ def build_project(source: Path, duration: float, turns, words, num_speakers) -> 
 
 
 def analyze(source: Path, proj_dir: Path, *, num_speakers=None, token=None, language="en",
-            ffmpeg=None, progress=lambda msg: None, diarize_fn=None, transcribe_fn=None) -> dict:
+            ffmpeg=None, progress=lambda msg, frac=None: None, diarize_fn=None, transcribe_fn=None) -> dict:
+    """progress(msg, frac): msg is a new step (or None), frac how far along the whole job is (0..1)."""
     proj_dir.mkdir(parents=True, exist_ok=True)
-    progress("Extracting audio")
-    duration = prepare_audio(source, proj_dir, find_ffmpeg(ffmpeg))
-    write_peaks(proj_dir / "audio.wav", proj_dir / "peaks.json")
-    progress("Finding who speaks when (first run downloads the model)")
-    turns = (diarize_fn or diarize)(proj_dir / "audio.wav", num_speakers, token)
-    progress("Transcribing")
     try:
-        words = (transcribe_fn or transcribe_words)(proj_dir / "audio.wav", language)
-    except ImportError:
-        progress("faster-whisper not installed; continuing without a transcript")
-        words = []
+        _phase(progress, "Extracting audio", 0.0, 0.06)
+        duration = prepare_audio(source, proj_dir, find_ffmpeg(ffmpeg))
+        write_peaks(proj_dir / "audio.wav", proj_dir / "peaks.json")
+        _phase(progress, "Finding who speaks when", 0.06, 0.5)
+        turns = (diarize_fn or diarize)(proj_dir / "audio.wav", num_speakers, token)
+        _phase(progress, "Transcribing", 0.5, 0.98)
+        try:
+            words = (transcribe_fn or transcribe_words)(proj_dir / "audio.wav", language)
+        except ImportError:
+            progress("faster-whisper not installed; continuing without a transcript")
+            words = []
+        progress("Saving", 0.99)
+    finally:
+        _end_phases()
     project = build_project(source, duration, turns, words, num_speakers)
     project["language"] = language if language not in (None, "", "auto") else (LAST_LANGUAGE["code"] or "en")
     save_project(proj_dir, project)
-    progress("Done")
+    progress("Done", 1.0)
     return project
 
 
@@ -628,7 +695,7 @@ def restore_previous(proj_dir: Path) -> bool:
 
 
 def resplit(proj_dir: Path, *, start: float, end: float | None, num_speakers=None, token=None, language="en",
-            retranscribe=False, keep_checked=True, progress=lambda msg: None, diarize_fn=None,
+            retranscribe=False, keep_checked=True, progress=lambda msg, frac=None: None, diarize_fn=None,
             transcribe_fn=None) -> dict:
     """Run the speaker split again on part (or all) of a project. See apply_resplit."""
     project = load_project(proj_dir)
@@ -636,23 +703,25 @@ def resplit(proj_dir: Path, *, start: float, end: float | None, num_speakers=Non
     start = max(0.0, start)
     if end - start < 1.0:
         raise ValueError("Mark at least one second to re-split.")
-    progress("Cutting the part to re-split")
+    progress("Cutting the part to re-split", 0.0)
     wav, offset = cut_range(proj_dir, start, end)
     try:
-        progress("Finding who speaks when")
+        _phase(progress, "Finding who speaks when", 0.03, 0.55 if retranscribe else 0.98)
         raw = (diarize_fn or diarize)(wav, num_speakers, token)
         turns = [(s + offset, e + offset, lab) for s, e, lab in raw]
         words = None
         if retranscribe:
-            progress("Transcribing")
+            _phase(progress, "Transcribing", 0.55, 0.98)
             words = [{**w, "s": round(w["s"] + offset, 3), "e": round(w["e"] + offset, 3)}
                      for w in (transcribe_fn or transcribe_words)(wav, language)]
     finally:
+        _end_phases()
         wav.unlink(missing_ok=True)
+    progress("Saving", 0.99)  # last point a cancel can stop it; after this the project changes
     save_previous(proj_dir)
     updated = apply_resplit(project, turns, start, end, new_words=words, keep_checked=keep_checked)
     save_project(proj_dir, updated)
-    progress("Done")
+    progress("Done", 1.0)
     return updated
 
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import queue
 import shutil
 import subprocess
 import sys
@@ -17,6 +16,7 @@ from flask import redirect, Flask, abort, jsonify, request, send_file, send_from
 from werkzeug.utils import secure_filename
 
 from . import core
+from .jobs import JobQueue
 
 ROOT = Path(__file__).resolve().parent.parent          # voice_splitter/
 STATIC = Path(__file__).resolve().parent / "static"
@@ -97,7 +97,7 @@ class Settings:
 
 
 def create_app(*, root: Path = ROOT, extra_folders=(), diarize_fn=None, transcribe_fn=None,
-               embed_fn=None, ffmpeg=None, download_fn=None, checks_fn=None) -> Flask:
+               embed_fn=None, ffmpeg=None, download_fn=None, checks_fn=None, start_worker=True) -> Flask:
     projects_dir = root / "projects"
     inbox = root / "inbox"
     secrets = root / "secrets"
@@ -174,38 +174,35 @@ def create_app(*, root: Path = ROOT, extra_folders=(), diarize_fn=None, transcri
             abort(404)
         return d
 
-    # ---- jobs: one at a time, since the models are heavy -----------------
-    jobs: dict[str, dict] = {}
-    work: "queue.Queue[str]" = queue.Queue()
+    # ---- jobs: one at a time, since the models are heavy (see splitter/jobs.py)
+    def run_job(job, report):
+        core.be_gentle()
+        apply_runtime()
+        if job["kind"] == "resplit":
+            core.resplit(projects_dir / job["project"], start=job["start"], end=job["end"],
+                         num_speakers=job["speakers"], token=token(), language=job["language"],
+                         retranscribe=job["retranscribe"], keep_checked=job["keep_checked"],
+                         progress=report, diarize_fn=diarize_fn, transcribe_fn=transcribe_fn)
+        else:
+            core.analyze(Path(job["path"]), projects_dir / job["project"],
+                         num_speakers=job["speakers"], token=token(), language=job["language"],
+                         ffmpeg=ffmpeg, progress=report, diarize_fn=diarize_fn, transcribe_fn=transcribe_fn)
 
-    def runner():
-        while True:
-            jid = work.get()
-            job = jobs[jid]
-            job["state"] = "running"
-            try:
-                apply_runtime()
+    def job_failed(job):
+        if job["kind"] != "resplit":  # a stopped re-split leaves your project as it was
+            shutil.rmtree(projects_dir / job["project"], ignore_errors=True)
 
-                def progress(msg):
-                    job["log"].append(msg)
-                    job["step"] = msg
-                if job.get("kind") == "resplit":
-                    core.resplit(projects_dir / job["project"], start=job["start"], end=job["end"],
-                                 num_speakers=job["speakers"], token=token(), language=job["language"],
-                                 retranscribe=job["retranscribe"], keep_checked=job["keep_checked"],
-                                 progress=progress, diarize_fn=diarize_fn, transcribe_fn=transcribe_fn)
-                else:
-                    core.analyze(Path(job["path"]), projects_dir / job["project"],
-                                 num_speakers=job["speakers"], token=token(), language=job["language"],
-                                 ffmpeg=ffmpeg, progress=progress,
-                                 diarize_fn=diarize_fn, transcribe_fn=transcribe_fn)
-                job["state"] = "done"
-            except Exception as e:
-                traceback.print_exc()
-                job["state"], job["error"] = "error", friendly_error(e)
-                if job.get("kind") != "resplit":  # a failed re-split leaves your project as it was
-                    shutil.rmtree(projects_dir / job["project"], ignore_errors=True)
-    threading.Thread(target=runner, daemon=True, name="splitter-jobs").start()
+    q = JobQueue(run_job, stats_path=root / "speed.json", on_failed=job_failed, start=start_worker)
+
+    # ---- your own labels on files ------------------------------------------
+    labels_path = root / "labels.json"
+
+    def read_labels() -> dict:
+        try:
+            data = json.loads(labels_path.read_text(encoding="utf-8"))
+            return {k: v for k, v in data.items() if isinstance(v, list)}
+        except Exception:
+            return {}
 
     app = Flask(__name__, static_folder=None)
 
@@ -217,7 +214,7 @@ def create_app(*, root: Path = ROOT, extra_folders=(), diarize_fn=None, transcri
         if host not in ("127.0.0.1", "localhost", "::1"):
             abort(403)
     app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024 * 1024
-    app.config["JOBS"] = jobs
+    app.config["JOBS"] = q
 
     @app.get("/")
     def home():
@@ -322,9 +319,14 @@ def create_app(*, root: Path = ROOT, extra_folders=(), diarize_fn=None, transcri
                                   "project": pid if (projects_dir / pid / "project.json").exists() else None,
                                   "exported": (projects_dir / pid / "export").exists(),
                                   "review": review_of(pid),
-                                  "video": p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov", ".avi"}})
-        running = {j["project"]: {"job": jid, "state": j["state"], "step": j["step"]}
-                   for jid, j in jobs.items() if j["state"] in ("queued", "running")}
+                                  "video": p.suffix.lower() in core.VIDEO_EXT})
+        snap = q.snapshot()
+        running = {}
+        for j in ([snap["running"]] if snap["running"] else []) + snap["queued"]:
+            running[j["project"]] = {"job": j["id"], "state": j["state"], "step": j["step"], "pct": j["pct"]}
+        labels = read_labels()
+        for f in files:
+            f["labels"] = labels.get(f["path"], [])
         try:
             core.find_ffmpeg(ffmpeg)
             ff = True
@@ -476,23 +478,86 @@ def create_app(*, root: Path = ROOT, extra_folders=(), diarize_fn=None, transcri
         settings.data.update({"speakers": speakers or "auto", "language": language})
         settings.save()
         pid = project_id(path)
-        for jid, j in jobs.items():
-            if j["project"] == pid and j["state"] in ("queued", "running"):
-                return jsonify({"job": jid, "project": pid})
+        active = q.active_for(pid)
+        if active:
+            return jsonify({"job": active["id"], "project": pid})
         if body.get("redo"):
             shutil.rmtree(projects_dir / pid, ignore_errors=True)
         elif (projects_dir / pid / "project.json").exists():
             return jsonify({"job": None, "project": pid, "existing": True})
-        jid = uuid.uuid4().hex[:10]
-        jobs[jid] = {"path": str(path), "project": pid, "speakers": speakers, "language": language,
-                     "state": "queued", "step": "Waiting", "log": [], "error": None}
-        work.put(jid)
-        return jsonify({"job": jid, "project": pid})
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        j = q.add(kind="split", name=path.name, project=pid, path=str(path), size=size,
+                  media="video" if path.suffix.lower() in core.VIDEO_EXT else "audio",
+                  speakers=speakers, language=language)
+        return jsonify({"job": j["id"], "project": pid})
+
+    # ---- the queue ------------------------------------------------------
+    @app.get("/api/queue")
+    def get_queue():
+        return jsonify(q.snapshot())
 
     @app.get("/api/jobs/<jid>")
     def job(jid):
-        j = jobs.get(jid) or abort(404)
-        return jsonify({k: j[k] for k in ("project", "state", "step", "log", "error")})
+        j = q.jobs.get(jid) or abort(404)
+        return jsonify({**q.public(j), "log": []})
+
+    @app.post("/api/jobs/<jid>/cancel")
+    def cancel_job(jid):
+        try:
+            return jsonify(q.public(q.cancel(jid)))
+        except KeyError:
+            abort(404, "That job has already finished.")
+
+    @app.post("/api/jobs/<jid>/move")
+    def move_job(jid):
+        try:
+            return jsonify({"order": q.move(jid, (request.get_json(silent=True) or {}).get("to", ""))})
+        except KeyError:
+            abort(409, "That file isn't waiting any more.")
+        except ValueError:
+            abort(400, "Move it to top, up or down.")
+
+    @app.post("/api/jobs/<jid>/retry")
+    def retry_job(jid):
+        try:
+            return jsonify(q.public(q.retry(jid)))
+        except KeyError:
+            abort(404, "Nothing to retry.")
+        except ValueError as e:
+            abort(409, str(e))
+
+    @app.delete("/api/jobs/<jid>")
+    def dismiss_job(jid):
+        q.dismiss(jid)
+        return jsonify({"ok": True})
+
+    @app.delete("/api/queue/recent")
+    def clear_recent():
+        q.clear_recent()
+        return jsonify({"ok": True})
+
+    # ---- labels -----------------------------------------------------------
+    @app.put("/api/labels")
+    def put_labels():
+        body = request.get_json(silent=True) or {}
+        path = Path(body.get("path", ""))
+        if not allowed(path):
+            abort(400, "File isn't in the library.")
+        clean = []
+        for t in body.get("labels") or []:
+            t = " ".join(str(t).split())[:32]
+            if t and t.lower() not in (c.lower() for c in clean):
+                clean.append(t)
+        data = read_labels()
+        if clean:
+            data[str(path)] = clean[:8]
+        else:
+            data.pop(str(path), None)
+        labels_path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        return jsonify({"labels": clean[:8]})
 
     # ---- projects -----------------------------------------------------
     @app.get("/api/projects/<pid>")
@@ -505,23 +570,24 @@ def create_app(*, root: Path = ROOT, extra_folders=(), diarize_fn=None, transcri
         """Re-run the speaker split on part or all of a project (queued like a split)."""
         d = proj_dir(pid)
         body = request.get_json(silent=True) or {}
-        for jid, j in jobs.items():
-            if j["project"] == pid and j["state"] in ("queued", "running"):
-                abort(409, "This file is already being worked on.")
+        if q.active_for(pid):
+            abort(409, "This file is already in the queue.")
         speakers = _speakers(body.get("speakers"))
-        duration = core.load_project(d)["duration"]
+        proj = core.load_project(d)
+        duration = proj["duration"]
         start = max(0.0, float(body.get("start") or 0))
         end = body.get("end")
         end = duration if end in (None, "") else min(duration, float(end))
         if end - start < 1.0:
             abort(400, "Mark at least one second to re-split.")
-        jid = uuid.uuid4().hex[:10]
-        jobs[jid] = {"kind": "resplit", "path": "", "project": pid, "speakers": speakers,
-                     "language": settings.data["language"], "start": start, "end": end,
-                     "retranscribe": bool(body.get("retranscribe")), "keep_checked": body.get("keep_checked", True) is not False,
-                     "state": "queued", "step": "Waiting", "log": [], "error": None}
-        work.put(jid)
-        return jsonify({"job": jid, "project": pid})
+        try:
+            size = int((d / "audio.wav").stat().st_size * (end - start) / max(duration, 1e-6) / 3)
+        except OSError:
+            size = 0  # a wav MB is about a third of the work of a source MB; it's only an estimate
+        j = q.add(kind="resplit", name=f"Re-split: {proj.get('name') or pid}", project=pid, size=size,
+                  speakers=speakers, language=settings.data["language"], start=start, end=end,
+                  retranscribe=bool(body.get("retranscribe")), keep_checked=body.get("keep_checked", True) is not False)
+        return jsonify({"job": j["id"], "project": pid})
 
     @app.post("/api/projects/<pid>/restore")
     def restore(pid):
