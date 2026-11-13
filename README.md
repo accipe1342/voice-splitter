@@ -76,6 +76,9 @@ library.
    **Queue** and split one at a time, so your PC stays usable. The queue shows
    progress and time left; you can cancel, remove, reorder (**Split next**,
    ↑ ↓) and retry from there. A note pops up when each one is ready.
+
+   ![The queue, with status pills and labels](docs/screenshots/queue.png)
+
 3. **Review.** Skim the lines or the transcript and fix what's wrong.
 4. **Export.** The full transcript (`transcript.txt` and `transcript.srt`),
    plus one folder per speaker with 2–12 second clips, a
