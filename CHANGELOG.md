@@ -17,6 +17,8 @@ First public release.
 - A queue: split many files one at a time with progress, time left, cancel, reorder and retry; the PC stays usable while it works.
 - Status pills on every file (queued, splitting, ready to review, in review, ready to export, exported, failed).
 - Your own labels on files, with a label filter.
+- Download just the transcript (.txt or .srt) from the review screen, without exporting clips.
+- Delete from the library: remove a file's split, or move the file itself to the Recycle Bin.
 - Filters for lines to check, left out or flagged, and library filters by review stage.
 - Voiceprint check that flags lines that sound like a different speaker.
 - Export the full transcript as text and SRT subtitles, labelled by speaker.

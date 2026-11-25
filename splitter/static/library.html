@@ -156,6 +156,7 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "
 const ICON = {
   audio: '<svg viewBox="0 0 16 16"><path d="M2 6h2v4H2zM5 3h2v10H5zM8 5h2v6H8zM11 2h2v12h-2z"/></svg>',
   video: '<svg viewBox="0 0 16 16"><path d="M1 3h10v10H1zM12 6l3-2v8l-3-2z"/></svg>',
+  trash: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 1h4l1 1h3v2H2V2h3zM3 5h10l-1 10H4zm3 2v6h1V7zm3 0v6h1V7z"/></svg>',
 };
 let lib = null, Q = { running: null, queued: [], recent: [] };
 
@@ -212,7 +213,8 @@ function statusOf(f) {
   const bad = failedFor(f);
   if (bad) return { pill: `<span class="pill bad" title="${esc(bad.error)}">Failed</span>`,
     btns: `<button class="btn small" data-retry="${bad.id}">Try again</button>`, key: "bad" };
-  if (!f.project) return { pill: "", btns: `<button class="btn small primary" data-split="${esc(f.path)}">Split speakers</button>`, key: "new" };
+  if (!f.project) return { pill: "", btns: `<button class="btn small primary" data-split="${esc(f.path)}">Split speakers</button>
+      <button class="btn small ghost icon" data-del title="Delete…" aria-label="Delete">${ICON.trash}</button>`, key: "new" };
   const r = f.review || { stage: f.exported ? "exported" : "to_review", kept: 0, checked: 0 };
   const pill = {
     to_review: '<span class="pill todo">Ready to review</span>',
@@ -221,7 +223,8 @@ function statusOf(f) {
     exported: '<span class="pill ok">Exported</span>' }[r.stage];
   return { pill, key: "proj" + r.stage,
     btns: `<a class="btn small primary" href="/review/${encodeURIComponent(f.project)}">Review</a>
-      <button class="btn small ghost" data-redo="${esc(f.path)}" title="Run the split again from scratch">Redo</button>` };
+      <button class="btn small ghost" data-redo="${esc(f.path)}" title="Run the split again from scratch">Redo</button>
+      <button class="btn small ghost icon" data-del title="Delete…" aria-label="Delete">${ICON.trash}</button>` };
 }
 
 function tagsHtml(f) {
@@ -447,7 +450,41 @@ $("#files").onclick = e => {
   if (b.dataset.retry) queueAct(`/api/jobs/${b.dataset.retry}/retry`);
   if (b.hasAttribute("data-tagadd") && f) editLabel(b, f);
   if (b.dataset.untag && f) saveLabels(f, f.labels.filter(t => t !== b.dataset.untag));
+  if (b.hasAttribute("data-del") && f) askDelete(f);
 };
+
+/* ---- delete ------------------------------------------------------------- */
+function modal(html) {
+  const bg = document.createElement("div"); bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
+  document.body.appendChild(bg);
+  const close = () => bg.remove();
+  bg.onclick = e => { if (e.target === bg || e.target.closest("[data-close]")) close(); };
+  bg.onkeydown = e => { if (e.key === "Escape") close(); };
+  const first = bg.querySelector("[data-close]"); if (first) first.focus();
+  return bg;
+}
+function askDelete(f) {
+  const split = !!f.project;
+  const bg = modal(`<h3>Delete ${esc(f.name)}?</h3>
+    ${split ? `<p><b>Remove split</b> clears its voices, your corrections and any exported clips. The file stays in your library so you can split it again.</p>` : ""}
+    <p><b>Delete file</b> ${split ? "does that and also moves" : "moves"} the file itself to the Recycle Bin, where you can restore it.</p>
+    <div class="actions">
+      <button class="btn ghost" data-close>Cancel</button>
+      ${split ? `<button class="btn" data-go="split">Remove split</button>` : ""}
+      <button class="btn danger" data-go="file">Delete file</button>
+    </div>`);
+  bg.querySelectorAll("[data-go]").forEach(btn => btn.onclick = async () => {
+    const file = btn.dataset.go === "file";
+    bg.querySelectorAll("button").forEach(x => x.disabled = true);
+    try {
+      await api("/api/files/delete", json("POST", { path: f.path, file }));
+      bg.remove();
+      toast(file ? "Moved to the Recycle Bin" : "Split removed");
+      load();
+    } catch (e) { bg.remove(); toast(e.message, true); }
+  });
+}
 $("#qlist").onclick = e => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.cancel) {

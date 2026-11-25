@@ -539,9 +539,10 @@ def _clock(t: float, srt: bool = False) -> str:
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
 
 
-def write_transcripts(out: Path, project: dict, names: dict) -> None:
-    """The whole conversation (every kept line, every voice) as transcript.txt and transcript.srt."""
-    turns = [t for t in sorted(project["turns"], key=lambda t: t["start"]) if not t["excluded"] and t["text"].strip()]
+def transcripts(project: dict, names: dict, *, everything: bool = False) -> tuple[str, str]:
+    """The conversation as plain text and as SRT subtitles. ``everything`` keeps lines you left out."""
+    turns = [t for t in sorted(project["turns"], key=lambda t: t["start"])
+             if (everything or not t["excluded"]) and t["text"].strip()]
     txt, srt, last = [], [], None
     for t in turns:
         who = names.get(t["speaker"], t["speaker"])
@@ -552,8 +553,38 @@ def write_transcripts(out: Path, project: dict, names: dict) -> None:
     for i, t in enumerate(turns, 1):
         srt += [str(i), f"{_clock(t['start'], True)} --> {_clock(t['end'], True)}",
                 f"{names.get(t['speaker'], t['speaker'])}: {t['text'].strip()}", ""]
-    (out / "transcript.txt").write_text("\n".join(txt) + "\n", encoding="utf-8")
-    (out / "transcript.srt").write_text("\n".join(srt), encoding="utf-8")
+    return "\n".join(txt) + "\n", "\n".join(srt)
+
+
+def write_transcripts(out: Path, project: dict, names: dict) -> None:
+    """The whole conversation (every kept line, every voice) as transcript.txt and transcript.srt."""
+    txt, srt = transcripts(project, names)
+    (out / "transcript.txt").write_text(txt, encoding="utf-8")
+    (out / "transcript.srt").write_text(srt, encoding="utf-8")
+
+
+def recycle(path: Path) -> None:
+    """Move a file to the Recycle Bin, so a delete can be undone from there."""
+    path = Path(path).resolve()
+    if sys.platform != "win32":
+        try:
+            from send2trash import send2trash
+        except ImportError:
+            raise OSError("Moving files to the trash only works on Windows here.") from None
+        send2trash(str(path))
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT), ("pFrom", wintypes.LPCWSTR),
+                    ("pTo", wintypes.LPCWSTR), ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", wintypes.BOOL),
+                    ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", wintypes.LPCWSTR)]
+    FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 3, 0x4, 0x10, 0x40, 0x400
+    op = SHFILEOPSTRUCTW(wFunc=FO_DELETE, pFrom=str(path) + "\0",
+                         fFlags=FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI)
+    if ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op)) or op.fAnyOperationsAborted or path.exists():
+        raise PermissionError(f"Windows wouldn't move {path.name} to the Recycle Bin.")
 
 
 # ------------------------------------------------------------------ re-split

@@ -22,7 +22,10 @@ Everything runs on your PC. Your original files are never changed.
   went wrong.
 - **Exports** the whole conversation as `transcript.txt` and `transcript.srt`
   (subtitles), and clips for each speaker with a `dataset.list` of what was
-  said in each one, in the format GPT-SoVITS reads.
+  said in each one, in the format GPT-SoVITS reads. Only need the words?
+  **Transcript** on the review screen downloads just the `.txt` or `.srt`.
+- **Deletes** a split, or the file itself (to the Recycle Bin), from the
+  trash button on each file.
 
 ## Install (Windows 10 or 11)
 

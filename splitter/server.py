@@ -11,8 +11,9 @@ import threading
 import traceback
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
-from flask import redirect, Flask, abort, jsonify, request, send_file, send_from_directory
+from flask import Flask, Response, abort, jsonify, redirect, request, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 
 from . import core
@@ -653,9 +654,58 @@ def create_app(*, root: Path = ROOT, extra_folders=(), diarize_fn=None, transcri
         open_folder(d / "export" if (d / "export").exists() else d)
         return jsonify({"ok": True})
 
+    @app.get("/api/projects/<pid>/transcript.<fmt>")
+    def transcript(pid, fmt):
+        """Download the whole transcript, every line and every voice, as .txt or .srt."""
+        if fmt not in ("txt", "srt"):
+            abort(404)
+        project = core.load_project(proj_dir(pid))
+        txt, srt = core.transcripts(project, {s["id"]: s["name"] for s in project["speakers"]},
+                                    everything=request.args.get("all") == "1")
+        name = f"{Path(project.get('name') or pid).stem} transcript.{fmt}"
+        return Response(txt if fmt == "txt" else srt, mimetype="text/plain; charset=utf-8",
+                        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
+    def remove_split(pid: str) -> None:
+        """Drop a file's split, its queued work and its exported clips."""
+        if not pid or "/" in pid or "\\" in pid or ".." in pid:
+            abort(400)
+        j = q.active_for(pid)
+        if j and j["state"] == "running":
+            abort(409, "It's being split right now. Cancel that first, then delete it.")
+        if j:
+            q.cancel(j["id"])
+        d = projects_dir / pid
+        if d.exists():
+            try:
+                shutil.rmtree(d)
+            except PermissionError:
+                abort(409, "Windows wouldn't let the split be removed. Close any clips or the export "
+                           "folder open in another app, then try again.")
+
     @app.delete("/api/projects/<pid>")
     def delete_project(pid):
-        shutil.rmtree(proj_dir(pid), ignore_errors=True)
+        proj_dir(pid)
+        remove_split(pid)
+        return jsonify({"ok": True})
+
+    @app.post("/api/files/delete")
+    def delete_file():
+        """Remove a file from the library: its split, and with ``file`` the file itself (to the Recycle Bin)."""
+        body = request.get_json(silent=True) or {}
+        path = Path(str(body.get("path") or ""))
+        if not allowed(path):
+            abort(404, "That file isn't in your library any more.")
+        path = path.resolve()
+        remove_split(project_id(path))
+        if body.get("file"):
+            try:
+                core.recycle(path)
+            except OSError as e:
+                abort(409, f"{e} If it's open in another app, close it and try again.")
+            data = read_labels()
+            if data.pop(str(path), None) is not None or data.pop(str(body["path"]), None) is not None:
+                labels_path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
         return jsonify({"ok": True})
 
     return app

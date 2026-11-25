@@ -162,13 +162,8 @@
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
 
   /* ---- dialogs ---- */
-  .modal-bg { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 70; padding: 16px; }
-  .modal { background: var(--panel); border: 1px solid var(--line2); border-radius: var(--r-lg); padding: 20px 22px; width: min(560px, 100%);
-    max-height: 90vh; overflow: auto; }
-  .modal h3 { margin: 0 0 6px; font-size: 18px; }
   .modal table { width: 100%; border-collapse: collapse; margin: 12px 0; }
   .modal td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
-  .modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
   .keys { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin-top: 12px; align-items: center; }
   kbd { font-family: var(--font); font-size: 12px; background: var(--bg); border: 1px solid var(--line2); border-bottom-width: 2px;
     border-radius: 4px; padding: 0 6px; color: var(--text); white-space: nowrap; }
@@ -198,6 +193,7 @@
     <button class="btn ghost hide-sm" id="vpBtn" title="Uses the lines you've confirmed (press C) as voiceprints, then flags lines that sound like someone else">Find mislabeled lines</button>
     <button class="btn ghost" id="helpBtn" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
     <a class="btn ghost" href="/settings" title="Settings" aria-label="Settings">⚙</a>
+    <button class="btn ghost" id="transcriptBtn" title="Download the whole conversation as text or subtitles">Transcript</button>
     <button class="btn primary" id="exportBtn" title="Ctrl+E">Export</button>
   </div>
 
@@ -1084,6 +1080,25 @@ async function doExport() {
   b.disabled = false; b.textContent = label; updateExportBtn();
 }
 $("#exportBtn").onclick = doExport;
+$("#transcriptBtn").onclick = showTranscript;
+
+/* The whole conversation, without exporting any clips. */
+async function showTranscript() {
+  if ($("#saved").textContent === "Saving…") await saveNow();   // so the download has your latest corrections
+  const left = P.turns.filter(t => t.excluded && t.text.trim()).length;
+  const base = `/api/projects/${encodeURIComponent(PID)}/transcript`;
+  const bg = modal(`<h3>Download the transcript</h3>
+    <p>Every line with who said it and when, using the names and corrections you've made. No clips are exported.</p>
+    ${left ? `<label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="trAll"> Include the ${left} line${left > 1 ? "s" : ""} you left out</label>` : ""}
+    <div class="actions">
+      <button class="btn ghost" data-close>Close</button>
+      <a class="btn" data-fmt="srt" href="${base}.srt" download title="Subtitles with exact times, for a video player or editor">Subtitles (.srt)</a>
+      <a class="btn primary" data-fmt="txt" href="${base}.txt" download title="Plain text, grouped by speaker">Text (.txt)</a>
+    </div>`);
+  const all = bg.querySelector("#trAll");
+  if (all) all.onchange = () => bg.querySelectorAll("[data-fmt]").forEach(a =>
+    a.href = `${base}.${a.dataset.fmt}${all.checked ? "?all=1" : ""}`);
+}
 
 /* ---------------- boot ---------------- */
 if (!store.get("vs-tip-review")) $("#tip").classList.remove("hidden");
